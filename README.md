@@ -4,9 +4,14 @@ This is a demo of the Upcastr Selenium project.
 
 ## Setup
 
-```bash
+````bash
 Install Ollama
-```
+
+Install dependencies
+
+```bash
+pip install -r requirements.txt
+````
 
 ## Run
 
