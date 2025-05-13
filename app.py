@@ -395,7 +395,7 @@ def execute_selenium_action(driver, instruction) -> tuple[bool, str | None]:
 def main():
     driver = setup_driver()
     initial_url = "https://sentry.tools.upcastr.co/auth/login/upcastr/?referrer=slack" # Example
-    # user_goal = "My username is tehreem@upcastr.co and password is z@#33UpDrago. I want to log in, then find and click '30 days' in a time range selector, and finally wait for 5 seconds."
+    user_goal = "My username is tehreem@upcastr.co and password is z@#33UpDrago. I want to log in, then find and click '30 days' in a time range selector, and finally wait for 5 seconds."
     # user_goal = "My username is tehreem@upcastr.co and password is z@#33UpDrago. I want to log in, then find and click projects and select event-managr and select 90 days in the date range and finally wait for 5 seconds."
     # user_goal = "My username is tehreem@upcastr.co and password is z@#33UpDrago. I want to log in, then find and click projects and select event-microsite and select last 24 hours in the date range and finally wait for 5 seconds."
     # user_goal = "My username is tehreem@upcastr.co and password is z@#33UpDrago. I want to log in, then find and click performance and select event-microsite from filter my projects dropdown in the performance page and select last 24 hours in the date range and select Frontend and finally wait for 5 seconds."
