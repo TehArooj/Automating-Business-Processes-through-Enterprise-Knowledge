@@ -10,34 +10,95 @@ import traceback
 import re
 import json # Import json module
 import requests # Import requests module
+from rag_system import MilvusRAGSystem # Import RAG system
 
 # --- Configuration ---
-GEMINI_API_KEY = "AIzaSyBUAZlbh21XcIKmjrLMh36pqKDUyD-e_qg" # Added Gemini API Key
+GEMINI_API_KEY = "AIzaSyCGQJM3AcplIqN7jYGIsy-ETMEjPz9ndPo" # Added Gemini API Key
 LLM_MODEL = 'gemini-2.0-flash' # Updated to use a Gemini model identifier
 WAIT_TIMEOUT = 10 # Seconds to wait for elements
 SHORT_DELAY = 2 # Seconds delay after action
+
+# Initialize RAG system (will be initialized in main)
+rag_system = None
 
 # --- Selenium Setup ---
 def setup_driver():
     options = webdriver.ChromeOptions()
     # options.add_argument('--headless')
     # options.add_argument('--disable-gpu')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
     
     try:
-        service = Service()
-        driver = webdriver.Chrome(options=options)
-        return driver
+        # Try to use ChromeDriverManager
+        driver_path = ChromeDriverManager().install()
+        
+        # Check if the path points to the actual chromedriver executable
+        import os
+        if not os.path.isfile(driver_path) or not os.access(driver_path, os.X_OK):
+            # If the path is wrong, try to find the actual chromedriver
+            driver_dir = os.path.dirname(driver_path)
+            for file in os.listdir(driver_dir):
+                if file == 'chromedriver' and os.access(os.path.join(driver_dir, file), os.X_OK):
+                    driver_path = os.path.join(driver_dir, file)
+                    break
+        
+        driver = webdriver.Chrome(service=Service(driver_path), options=options)
     except Exception as e:
-        print(f"Error setting up Chrome driver: {str(e)}")
-        raise
+        print(f"Error with ChromeDriverManager: {e}")
+        print("Trying to use system chromedriver...")
+        # Fallback to system chromedriver
+        try:
+            driver = webdriver.Chrome(options=options)
+        except Exception as e2:
+            print(f"Error with system chromedriver: {e2}")
+            raise Exception("Could not initialize Chrome driver. Please ensure Chrome and chromedriver are properly installed.")
+    
+    return driver
+
+# --- Enhanced LLM Interaction with RAG ---
+def get_rag_context(user_goal: str) -> str:
+    """Get relevant context from RAG system based on user goal"""
+    global rag_system
+    
+    if rag_system is None:
+        return ""
+    
+    try:
+        # Extract potential documentation queries from the user goal
+        doc_queries = []
+        
+        # Look for keywords that might benefit from documentation
+        keywords = ['login', 'authentication', 'pricing', 'api', 'security', 'features', 'setup', 'configuration']
+        for keyword in keywords:
+            if keyword.lower() in user_goal.lower():
+                doc_queries.append(f"How to {keyword}")
+        
+        # If no specific keywords found, use the goal itself
+        if not doc_queries:
+            doc_queries = [user_goal]
+        
+        # Get RAG context for the most relevant query
+        rag_result = rag_system.query(doc_queries[0], top_k=3)
+        
+        if rag_result['retrieved_docs']:
+            context = "\n".join([
+                f"Documentation: {doc['text'][:500]}..."
+                for doc in rag_result['retrieved_docs'][:2]  # Use top 2 results
+            ])
+            return f"\n\nRelevant Documentation Context:\n{context}\n"
+        
+    except Exception as e:
+        print(f"--- Error getting RAG context: {e} ---")
+    
+    return ""
 
 # --- LLM Interaction ---
 def get_llm_web_steps(driver, user_goal, completed_steps_context: list[str], previous_error_info: str | None = None):
     print(f"\n--- Requesting LLM to generate web operation steps for goal: \"{user_goal[:80]}...\" ---")
     if previous_error_info:
         print(f"--- Context from previous step generation/execution attempt: {previous_error_info} ---")
+
+    # Get RAG context for enhanced understanding
+    rag_context = get_rag_context(user_goal)
 
     html_content = driver.page_source
     MAX_HTML_LEN = 100000 # Approx 100KB
@@ -62,7 +123,7 @@ Your task is to generate a short, logical sequence of 1 to 3 user-facing actions
 
 User's Overall Goal:
 {user_goal}
-
+{rag_context}
 Current HTML Content of the Webpage (may be truncated):
 ---
 {html_content}
@@ -393,13 +454,23 @@ def execute_selenium_action(driver, instruction) -> tuple[bool, str | None]:
 
 # --- Main Execution Logic ---
 def main():
+    global rag_system
+    
+    # Initialize RAG system
+    print("Initializing RAG system...")
+    try:
+        rag_system = MilvusRAGSystem()
+        print("RAG system initialized successfully!")
+    except Exception as e:
+        print(f"Warning: Failed to initialize RAG system: {e}")
+        print("Continuing without RAG support...")
+        rag_system = None
+    
     driver = setup_driver()
     initial_url = "https://sentry.tools.upcastr.co/auth/login/upcastr/?referrer=slack" # Example
-    user_goal = "My username is tehreem@upcastr.co and password is z@#33UpDrago. I want to log in, then find and click '30 days' in a time range selector, and finally wait for 5 seconds."
-    # user_goal = "My username is tehreem@upcastr.co and password is z@#33UpDrago. I want to log in, then find and click projects and select event-managr and select 90 days in the date range and finally wait for 5 seconds."
-    # user_goal = "My username is tehreem@upcastr.co and password is z@#33UpDrago. I want to log in, then find and click projects and select event-microsite and select last 24 hours in the date range and finally wait for 5 seconds."
-    # user_goal = "My username is tehreem@upcastr.co and password is z@#33UpDrago. I want to log in, then find and click performance and select event-microsite from filter my projects dropdown in the performance page and select last 24 hours in the date range and select Frontend and finally wait for 5 seconds."
-    # user_goal = "My username is tehreem@upcastr.co and password is z@#33UpDrago. I want to log in, then find and click stats and click health from stats page and select last 12 weeks in the date range and finally wait for 5 seconds."
+    # user_goal = "My username is sharjeel@upcastr.co and password is hpg!jbn9jbw.tfd0UVJ. I want to log in, then find and click '30 days' in a time range selector, and finally wait for 5 seconds."
+    user_goal = "My username is sharjeel@upcastr.co and password is hpg!jbn9jbw.tfd0UVJ. I want to log in, then find and click projects and select event-managr and select 90 days in the date range and finally wait for 5 seconds."
+
     print(f"Navigating to: {initial_url}")
     driver.get(initial_url)
     time.sleep(3) # Initial wait for page load, adjust as needed

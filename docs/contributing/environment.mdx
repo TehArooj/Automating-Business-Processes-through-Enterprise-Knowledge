@@ -1,0 +1,56 @@
+---
+title: Development Environment
+noindex: true
+sidebar_order: 1
+---
+
+This setup assumes you have [Yarn][Yarn], [Volta][volta] and [pre-commit][pre-commit] installed.
+
+If you prefer not to use Volta, make sure you're using Node 20.
+
+First, open a terminal and clone the `sentry-docs` repo:
+
+```bash
+# Clone the docs repo
+git clone git@github.com:getsentry/sentry-docs.git
+```
+
+Next, navigate into the cloned repo and run the following to install dependencies:
+
+```bash
+# Install or update application dependencies
+make
+```
+
+Now, run the development webserver (depending on the docs you want to run):
+
+```bash
+# Start dev server for user docs
+yarn dev
+
+# Start dev server for developer docs
+yarn dev:developer-docs
+```
+
+You will now be able to access docs via http://localhost:3000.
+
+[Next.js]: https://nextjs.org/
+[volta]: https://volta.sh/
+[pre-commit]: https://pre-commit.com/
+[Yarn]: https://yarnpkg.com/
+
+## Linting
+
+A few linters are available. Run `yarn lint` to apply them all.
+
+Some lints can be autofixed with eslint
+
+```bash
+yarn lint:eslint:fix
+```
+
+Additionally we use prettier to format our code and markdown. Run prettier if you get linting errors in CI:
+
+```bash
+yarn lint:prettier:fix
+```
