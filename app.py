@@ -17,9 +17,249 @@ GEMINI_API_KEY = "AIzaSyCGQJM3AcplIqN7jYGIsy-ETMEjPz9ndPo" # Added Gemini API Ke
 LLM_MODEL = 'gemini-2.0-flash' # Updated to use a Gemini model identifier
 WAIT_TIMEOUT = 10 # Seconds to wait for elements
 SHORT_DELAY = 2 # Seconds delay after action
+MAX_CREDENTIAL_ATTEMPTS = 3 # Maximum attempts to get credentials from user
+MAX_DECISION_ATTEMPTS = 3 # Maximum attempts to get user decisions
 
 # Initialize RAG system (will be initialized in main)
 rag_system = None
+
+# --- Generic Decision Making System ---
+def prompt_user_decision(context: str, question: str, options: list = None, decision_type: str = "choice") -> str:
+    """
+    Generic function to prompt user for decisions with retry logic.
+    
+    Args:
+        context: Background information about the current situation
+        question: The specific question/decision to ask
+        options: List of available options (if applicable)
+        decision_type: Type of decision ("choice", "text_input", "yes_no")
+    
+    Returns:
+        User's decision as a string, or None if failed
+    """
+    print(f"\n{'='*60}")
+    print("HUMAN DECISION REQUIRED")
+    print(f"{'='*60}")
+    print(f"Context: {context}")
+    print(f"\nQuestion: {question}")
+    
+    if options and decision_type == "choice":
+        print(f"\nAvailable options:")
+        for i, option in enumerate(options, 1):
+            print(f"  {i}. {option}")
+    
+    attempts = 0
+    while attempts < MAX_DECISION_ATTEMPTS:
+        try:
+            if decision_type == "choice" and options:
+                response = input(f"\nPlease select an option (1-{len(options)}) or type your custom response (attempt {attempts + 1}/{MAX_DECISION_ATTEMPTS}): ").strip()
+                
+                # Check if it's a number selection
+                if response.isdigit():
+                    choice_num = int(response)
+                    if 1 <= choice_num <= len(options):
+                        selected_option = options[choice_num - 1]
+                        print(f"You selected: {selected_option}")
+                        return selected_option
+                    else:
+                        print(f"Invalid option number. Please choose between 1 and {len(options)}.")
+                        attempts += 1
+                        continue
+                
+                # If not a number, treat as custom response
+                if response:
+                    print(f"You entered: {response}")
+                    return response
+                else:
+                    print("Response cannot be empty.")
+                    
+            elif decision_type == "yes_no":
+                response = input(f"\nPlease answer yes/no (attempt {attempts + 1}/{MAX_DECISION_ATTEMPTS}): ").strip().lower()
+                if response in ['yes', 'y', 'no', 'n']:
+                    result = 'yes' if response in ['yes', 'y'] else 'no'
+                    print(f"You answered: {result}")
+                    return result
+                else:
+                    print("Please answer with 'yes' or 'no'.")
+                    
+            else:  # text_input or fallback
+                response = input(f"\nPlease provide your input (attempt {attempts + 1}/{MAX_DECISION_ATTEMPTS}): ").strip()
+                if response:
+                    print(f"You entered: {response}")
+                    return response
+                else:
+                    print("Input cannot be empty.")
+            
+            attempts += 1
+            
+        except KeyboardInterrupt:
+            print("\nDecision input cancelled by user.")
+            return None
+        except Exception as e:
+            print(f"Error getting decision: {e}")
+            attempts += 1
+    
+    print(f"Failed to get a valid decision after {MAX_DECISION_ATTEMPTS} attempts.")
+    return None
+
+def parse_human_decision_step(step_description: str) -> dict:
+    """
+    Parse a human decision step to extract the question and options.
+    Expected format: "HUMAN_DECISION: context | question | option1,option2,option3"
+    """
+    if not step_description.upper().startswith("HUMAN_DECISION:"):
+        return None
+    
+    try:
+        # Remove the prefix
+        content = step_description[len("HUMAN_DECISION:"):].strip()
+        parts = content.split("|")
+        
+        if len(parts) >= 2:
+            context = parts[0].strip()
+            question = parts[1].strip()
+            options = []
+            decision_type = "text_input"
+            
+            if len(parts) >= 3:
+                options_str = parts[2].strip()
+                if options_str.lower() == "yes_no":
+                    decision_type = "yes_no"
+                elif options_str:
+                    options = [opt.strip() for opt in options_str.split(",") if opt.strip()]
+                    decision_type = "choice" if options else "text_input"
+            
+            return {
+                "context": context,
+                "question": question,
+                "options": options,
+                "decision_type": decision_type
+            }
+    except Exception as e:
+        print(f"Error parsing human decision step: {e}")
+    
+    return None
+
+# --- Credential Management ---
+def needs_credentials(user_goal: str, html_content: str = "") -> dict:
+    """
+    Detect if the user goal requires credentials that are missing.
+    Returns a dict with 'needs_username', 'needs_password', and 'missing_credentials' keys.
+    """
+    goal_lower = user_goal.lower()
+    needs_creds = {
+        'needs_username': False,
+        'needs_password': False,
+        'missing_credentials': []
+    }
+    
+    # Check if goal mentions login/authentication
+    login_keywords = ['login', 'log in', 'sign in', 'authenticate', 'auth']
+    mentions_login = any(keyword in goal_lower for keyword in login_keywords)
+    
+    if mentions_login:
+        # Check for existing credentials in the goal
+        has_username = any(pattern in goal_lower for pattern in [
+            'username is', 'user is', 'email is', 'my username', 'my email',
+            '@', 'username:', 'email:', 'user:'
+        ])
+        
+        has_password = any(pattern in goal_lower for pattern in [
+            'password is', 'my password', 'password:', 'pass is'
+        ])
+        
+        if not has_username:
+            needs_creds['needs_username'] = True
+            needs_creds['missing_credentials'].append('username/email')
+            
+        if not has_password:
+            needs_creds['needs_password'] = True
+            needs_creds['missing_credentials'].append('password')
+    
+    # Additional check: look for login forms in HTML
+    if html_content:
+        html_lower = html_content.lower()
+        has_login_form = any(pattern in html_lower for pattern in [
+            'type="password"', 'name="password"', 'id="password"',
+            'type="email"', 'name="email"', 'name="username"',
+            'login-form', 'signin-form', 'auth-form'
+        ])
+        
+        if has_login_form and not mentions_login:
+            # If there's a login form but user didn't mention login, 
+            # we might still need credentials
+            needs_creds['needs_username'] = True
+            needs_creds['needs_password'] = True
+            needs_creds['missing_credentials'] = ['username/email', 'password']
+    
+    return needs_creds
+
+def prompt_for_credentials(missing_credentials: list) -> dict:
+    """
+    Prompt user for missing credentials with retry logic.
+    Returns a dict with the collected credentials or None if failed.
+    """
+    credentials = {}
+    
+    for credential_type in missing_credentials:
+        attempts = 0
+        while attempts < MAX_CREDENTIAL_ATTEMPTS:
+            try:
+                if credential_type == 'username/email':
+                    value = input(f"\nPlease enter your username or email (attempt {attempts + 1}/{MAX_CREDENTIAL_ATTEMPTS}): ").strip()
+                    if value:
+                        credentials['username'] = value
+                        break
+                    else:
+                        print("Username/email cannot be empty.")
+                        
+                elif credential_type == 'password':
+                    import getpass
+                    value = getpass.getpass(f"\nPlease enter your password (attempt {attempts + 1}/{MAX_CREDENTIAL_ATTEMPTS}): ").strip()
+                    if value:
+                        credentials['password'] = value
+                        break
+                    else:
+                        print("Password cannot be empty.")
+                        
+                attempts += 1
+                
+            except KeyboardInterrupt:
+                print("\nCredential input cancelled by user.")
+                return None
+            except Exception as e:
+                print(f"Error getting {credential_type}: {e}")
+                attempts += 1
+        
+        if attempts >= MAX_CREDENTIAL_ATTEMPTS:
+            print(f"Failed to get {credential_type} after {MAX_CREDENTIAL_ATTEMPTS} attempts.")
+            return None
+    
+    return credentials
+
+def update_goal_with_credentials(user_goal: str, credentials: dict) -> str:
+    """
+    Update the user goal to include the provided credentials.
+    """
+    updated_goal = user_goal
+    
+    # Add credentials to the beginning of the goal
+    credential_text = ""
+    if 'username' in credentials:
+        credential_text += f"My username is {credentials['username']}"
+    if 'password' in credentials:
+        if credential_text:
+            credential_text += f" and password is {credentials['password']}. "
+        else:
+            credential_text += f"My password is {credentials['password']}. "
+    
+    if credential_text:
+        # Check if goal already starts with credential info
+        goal_lower = updated_goal.lower()
+        if not any(pattern in goal_lower[:50] for pattern in ['username is', 'password is', 'my username', 'my password']):
+            updated_goal = credential_text + updated_goal
+    
+    return updated_goal
 
 # --- Selenium Setup ---
 def setup_driver():
@@ -113,7 +353,8 @@ def get_llm_web_steps(driver, user_goal, completed_steps_context: list[str], pre
       {"description": "Type the email 'user@example.com' into the email input field."},
       {"description": "Type the password 'securepassword123' into the password input field."},
       {"description": "Click the main login button."},
-      {"description": "wait for 3 seconds"}
+      {"description": "wait for 3 seconds"},
+      {"description": "HUMAN_DECISION: Multiple projects available | Which project should I select? | ProjectA,ProjectB,ProjectC"}
     ]
     '''
 
@@ -147,8 +388,25 @@ Instructions for your response:
 1.  Examine the HTML and the user's goal.
 2.  If the goal involves typing information (like usernames, passwords, search terms), and relevant input fields are visible, your steps should include typing that information. Embed the actual values to type directly in the description string.
 3.  If the goal involves waiting, include a step like: {{"description": "wait for X seconds"}}.
-4.  Respond ONLY with a single JSON list of objects. Each object MUST have a "description" key, containing a natural language string of the action.
-5.  If you believe the user's goal (or the current relevant part of it) is complete, or if no sensible next actions can be determined from the current page and goal, return an empty JSON list: [].
+4.  **IMPORTANT: If you encounter ANY situation where human decision/input is needed, create a HUMAN_DECISION step using this format:**
+    {{"description": "HUMAN_DECISION: [context] | [question] | [options_or_type]"}}
+    
+    Examples of when to request human decisions:
+    - Multiple similar elements/options available (e.g., multiple buttons, links, dropdown options)
+    - Ambiguous user goal that could be interpreted multiple ways
+    - Form fields that require user-specific information not provided in the goal
+    - Confirmation needed before potentially destructive actions
+    - When you're uncertain about which path to take
+    
+    Format for HUMAN_DECISION:
+    - Context: Brief description of the current situation
+    - Question: Clear question asking what the user wants to do
+    - Options: Either comma-separated list of choices, "yes_no" for yes/no questions, or leave empty for free text input
+    
+    Example: "HUMAN_DECISION: Found 3 different login buttons on the page | Which login method do you prefer? | Google Login,Email Login,SSO Login"
+    
+5.  Respond ONLY with a single JSON list of objects. Each object MUST have a "description" key, containing a natural language string of the action.
+6.  If you believe the user's goal (or the current relevant part of it) is complete, or if no sensible next actions can be determined from the current page and goal, return an empty JSON list: [].
 
 Example of a valid JSON response format:
 {json_steps_example}
@@ -468,12 +726,39 @@ def main():
     
     driver = setup_driver()
     initial_url = "https://sentry.tools.upcastr.co/auth/login/upcastr/?referrer=slack" # Example
-    # user_goal = "My username is sharjeel@upcastr.co and password is hpg!jbn9jbw.tfd0UVJ. I want to log in, then find and click '30 days' in a time range selector, and finally wait for 5 seconds."
-    user_goal = "My username is sharjeel@upcastr.co and password is hpg!jbn9jbw.tfd0UVJ. I want to log in, then find and click projects and select event-managr and select 90 days in the date range and finally wait for 5 seconds."
+    
+    # Get user goal - this could be from command line args, input, or hardcoded for testing
+    user_goal = input("\nPlease enter your goal (what you want to accomplish): ").strip()
+    if not user_goal:
+        # Fallback to example goal for testing
+        user_goal = "I want to log in, then find and click '30 days' in a time range selector, and finally wait for 5 seconds."
+        print(f"Using default goal: {user_goal}")
 
     print(f"Navigating to: {initial_url}")
     driver.get(initial_url)
     time.sleep(3) # Initial wait for page load, adjust as needed
+
+    # Check if credentials are needed and prompt user if necessary
+    print("\n--- Checking if credentials are required ---")
+    html_content = driver.page_source
+    credential_check = needs_credentials(user_goal, html_content)
+    
+    if credential_check['missing_credentials']:
+        print(f"Missing credentials detected: {', '.join(credential_check['missing_credentials'])}")
+        print("You will be prompted to enter the required credentials.")
+        
+        credentials = prompt_for_credentials(credential_check['missing_credentials'])
+        
+        if credentials:
+            print("Credentials collected successfully.")
+            user_goal = update_goal_with_credentials(user_goal, credentials)
+            print(f"Updated goal: {user_goal}")
+        else:
+            print("Failed to collect required credentials. Exiting.")
+            driver.quit()
+            return
+    else:
+        print("No missing credentials detected.")
 
     completed_step_descriptions_for_context = []
     last_step_generation_or_execution_error = None
@@ -505,8 +790,42 @@ def main():
             step_description = step_data["description"]
             print(f"\n=== Processing Generated Step {step_index + 1}/{len(current_step_sequence_descriptions)}: {step_description[:70]}... ===")
 
+            # Handle HUMAN_DECISION steps
+            if step_description.upper().startswith("HUMAN_DECISION:"):
+                decision_info = parse_human_decision_step(step_description)
+                if decision_info:
+                    user_decision = prompt_user_decision(
+                        decision_info["context"],
+                        decision_info["question"],
+                        decision_info["options"],
+                        decision_info["decision_type"]
+                    )
+                    
+                    if user_decision:
+                        success_message = f"Human decision made: {decision_info['question']} -> {user_decision}"
+                        completed_step_descriptions_for_context.append(success_message)
+                        
+                        # Update the user goal to include the decision context
+                        decision_context = f"Based on the user's decision for '{decision_info['question']}', the user chose: {user_decision}. "
+                        if decision_context not in user_goal:
+                            # Add decision context to help future LLM calls
+                            completed_step_descriptions_for_context.append(f"Decision context: {decision_context}")
+                        
+                        print(f"=== Human Decision Step COMPLETED: User chose '{user_decision}' ===")
+                        continue  # Move to next step
+                    else:
+                        print("=== Human Decision Step FAILED: User didn't provide a decision ===")
+                        last_step_generation_or_execution_error = f"Human decision required but user didn't provide input for: {decision_info['question']}"
+                        sequence_fully_successful = False
+                        break
+                else:
+                    print(f"=== Error: Could not parse HUMAN_DECISION step: {step_description} ===")
+                    last_step_generation_or_execution_error = f"Malformed HUMAN_DECISION step: {step_description}"
+                    sequence_fully_successful = False
+                    break
+
             # Handle special "wait" command directly
-            if "wait for" in step_description.lower() and "seconds" in step_description.lower():
+            elif "wait for" in step_description.lower() and "seconds" in step_description.lower():
                 try:
                     wait_time_match = re.search(r'(\d+)', step_description)
                     if wait_time_match:
@@ -529,35 +848,36 @@ def main():
                     break # Break from this sequence, re-prompt get_llm_web_steps
 
             # For regular steps, get Selenium instruction and execute
-            action_successful = False
-            current_action_error_context = None # Error context for retrying get_llm_instruction
+            else:
+                action_successful = False
+                current_action_error_context = None # Error context for retrying get_llm_instruction
 
-            for attempt in range(MAX_ACTION_RETRIES):
-                print(f"--- Attempt {attempt + 1}/{MAX_ACTION_RETRIES} for action: '{step_description[:60]}' ---")
-                selenium_action_instruction = get_llm_instruction(driver, step_description, current_action_error_context)
-                current_action_error_context = None # Reset for next potential retry within this action
+                for attempt in range(MAX_ACTION_RETRIES):
+                    print(f"--- Attempt {attempt + 1}/{MAX_ACTION_RETRIES} for action: '{step_description[:60]}' ---")
+                    selenium_action_instruction = get_llm_instruction(driver, step_description, current_action_error_context)
+                    current_action_error_context = None # Reset for next potential retry within this action
 
-                if selenium_action_instruction:
-                    success, execution_error_msg = execute_selenium_action(driver, selenium_action_instruction)
-                    if success:
-                        print(f"=== Step '{step_description[:60]}' SUCCEEDED ===")
-                        completed_step_descriptions_for_context.append(f"Successfully executed: {step_description}")
-                        action_successful = True
-                        break # Selenium action successful, break from MAX_ACTION_RETRIES loop
-                    else:
-                        print(f"--- Selenium execution FAILED for '{step_description[:60]}': {execution_error_msg} ---")
-                        current_action_error_context = execution_error_msg # Use this error for the next get_llm_instruction call
-                        if attempt == MAX_ACTION_RETRIES - 1: # Last retry for this action failed
-                            last_step_generation_or_execution_error = f"Action '{step_description}' failed after {MAX_ACTION_RETRIES} attempts. Last error: {execution_error_msg}."
-                else: # get_llm_instruction returned None
-                    print(f"--- LLM FAILED to provide Selenium instruction for '{step_description[:60]}'. ---")
-                    current_action_error_context = "LLM did not return a valid Selenium JSON instruction for the step description."
-                    if attempt == MAX_ACTION_RETRIES - 1: # Last retry for getting instruction failed
-                        last_step_generation_or_execution_error = f"Failed to get Selenium instruction for '{step_description}' after {MAX_ACTION_RETRIES} tries. LLM did not provide a command."
-            
-            if not action_successful:
-                sequence_fully_successful = False
-                break # Break from processing current_step_sequence_descriptions, go to next main loop to regenerate step sequence
+                    if selenium_action_instruction:
+                        success, execution_error_msg = execute_selenium_action(driver, selenium_action_instruction)
+                        if success:
+                            print(f"=== Step '{step_description[:60]}' SUCCEEDED ===")
+                            completed_step_descriptions_for_context.append(f"Successfully executed: {step_description}")
+                            action_successful = True
+                            break # Selenium action successful, break from MAX_ACTION_RETRIES loop
+                        else:
+                            print(f"--- Selenium execution FAILED for '{step_description[:60]}': {execution_error_msg} ---")
+                            current_action_error_context = execution_error_msg # Use this error for the next get_llm_instruction call
+                            if attempt == MAX_ACTION_RETRIES - 1: # Last retry for this action failed
+                                last_step_generation_or_execution_error = f"Action '{step_description}' failed after {MAX_ACTION_RETRIES} attempts. Last error: {execution_error_msg}."
+                    else: # get_llm_instruction returned None
+                        print(f"--- LLM FAILED to provide Selenium instruction for '{step_description[:60]}'. ---")
+                        current_action_error_context = "LLM did not return a valid Selenium JSON instruction for the step description."
+                        if attempt == MAX_ACTION_RETRIES - 1: # Last retry for getting instruction failed
+                            last_step_generation_or_execution_error = f"Failed to get Selenium instruction for '{step_description}' after {MAX_ACTION_RETRIES} tries. LLM did not provide a command."
+                
+                if not action_successful:
+                    sequence_fully_successful = False
+                    break # Break from processing current_step_sequence_descriptions, go to next main loop to regenerate step sequence
 
         if not sequence_fully_successful:
             print("--- Current sequence of steps encountered an issue. Attempting to get a new sequence from LLM. ---")
