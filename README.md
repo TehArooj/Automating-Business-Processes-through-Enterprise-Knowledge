@@ -52,8 +52,11 @@ cd selenium-milvus-rag
 ./start.sh
 
 # Option B: Manual setup
+# Install dependencies
+python3 install_deps.py
+# Start Milvus services
 docker-compose up -d
-pip install -r requirements.txt
+# Setup knowledge base
 python setup_knowledge_base.py
 ```
 
