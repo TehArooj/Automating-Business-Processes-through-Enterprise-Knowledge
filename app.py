@@ -12,11 +12,12 @@ import traceback
 import re
 import json # Import json module
 import requests # Import requests module
+from openai import OpenAI # Import OpenAI client for OpenRouter
 from rag_system import MilvusRAGSystem # Import RAG system
 
 # --- Configuration ---
-GEMINI_API_KEY = "AIzaSyCGQJM3AcplIqN7jYGIsy-ETMEjPz9ndPo" # Added Gemini API Key
-LLM_MODEL = 'gemini-2.5-flash-preview-05-20' # Updated to use a Gemini model identifier
+OPENROUTER_API_KEY = "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" # OpenRouter API Key
+LLM_MODEL = 'meta-llama/llama-4-maverick' # Kimi K2 model identifier
 WAIT_TIMEOUT = 10 # Seconds to wait for elements
 DROPDOWN_WAIT_TIMEOUT = 15 # Longer timeout for dropdown operations
 SHORT_DELAY = 2 # Seconds delay after action
@@ -509,51 +510,48 @@ Based on the above, provide the JSON list of step descriptions:
 """
     json_string = None
     try:
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{LLM_MODEL}:generateContent?key={GEMINI_API_KEY}"
-        headers = {'Content-Type': 'application/json'}
-        data = {
-            "contents": [{"parts":[{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.2,
-                "responseMimeType": "application/json"
-            }
-        }
-        response = requests.post(api_url, headers=headers, json=data, timeout=45)
-        response.raise_for_status()
-        raw_response_json = response.json()
-
-        if raw_response_json.get('candidates') and \
-           raw_response_json['candidates'][0].get('content') and \
-           raw_response_json['candidates'][0]['content'].get('parts') and \
-           raw_response_json['candidates'][0]['content']['parts'][0].get('text'):
-            json_string = raw_response_json['candidates'][0]['content']['parts'][0]['text']
-            print(f"--- Extracted JSON String for steps ---\n{json_string}\n---------------------------")
-            parsed_steps = json.loads(json_string)
-            if not isinstance(parsed_steps, list):
-                print("--- Error: Parsed JSON for steps is not a list. ---")
-                return None
-            for step in parsed_steps:
-                if not isinstance(step, dict) or "description" not in step:
-                    print(f"--- Error: Invalid step format in list: {step}. Missing 'description'. ---")
-                    return None
-            print(f"--- Parsed Step Descriptions ---\n{json.dumps(parsed_steps, indent=2)}\n--------------------------")
-            return parsed_steps
-        else:
-            print("--- Error: Could not find JSON content for steps in Gemini API response. ---")
-            print(f"--- Raw Response: {json.dumps(raw_response_json, indent=2)} ---")
+        # Initialize OpenRouter client
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY,
+        )
+        
+        completion = client.chat.completions.create(
+            extra_headers={
+                "HTTP-Referer": "https://github.com/your-repo",  # Optional
+                "X-Title": "Web Automation Assistant",  # Optional
+            },
+            model=LLM_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.2,
+            timeout=45
+        )
+        
+        json_string = completion.choices[0].message.content
+        print(f"--- Extracted JSON String for steps ---\n{json_string}\n---------------------------")
+        
+        parsed_steps = json.loads(json_string)
+        if not isinstance(parsed_steps, list):
+            print("--- Error: Parsed JSON for steps is not a list. ---")
             return None
-    except requests.exceptions.HTTPError as http_err:
-        print(f"--- HTTP error in get_llm_web_steps: {http_err} - {response.text} ---")
-        return None
-    except requests.exceptions.RequestException as req_err:
-        print(f"--- Request error in get_llm_web_steps: {req_err} ---")
-        return None
+        for step in parsed_steps:
+            if not isinstance(step, dict) or "description" not in step:
+                print(f"--- Error: Invalid step format in list: {step}. Missing 'description'. ---")
+                return None
+        print(f"--- Parsed Step Descriptions ---\n{json.dumps(parsed_steps, indent=2)}\n--------------------------")
+        return parsed_steps
+        
     except json.JSONDecodeError as jde:
         print(f"--- Error: Failed to decode JSON string for steps: {jde} ---")
         print(f"Extracted string was: {json_string}")
         return None
     except Exception as e:
-        print(f"--- Error during Gemini API call or JSON processing in get_llm_web_steps: {e} ---")
+        print(f"--- Error during OpenRouter API call or JSON processing in get_llm_web_steps: {e} ---")
         print(traceback.format_exc())
         return None
 
@@ -635,58 +633,53 @@ JSON Instruction:
     instruction = None
     json_string = None
     try:
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{LLM_MODEL}:generateContent?key={GEMINI_API_KEY}"
-        headers = {'Content-Type': 'application/json'}
-        data = {
-            "contents": [{"parts":[{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.1,
-                "responseMimeType": "application/json"
-            }
-        }
+        # Initialize OpenRouter client
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY,
+        )
+        
+        completion = client.chat.completions.create(
+            extra_headers={
+                "HTTP-Referer": "https://github.com/your-repo",  # Optional
+                "X-Title": "Web Automation Assistant",  # Optional
+            },
+            model=LLM_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.1,
+            timeout=30
+        )
+        
+        json_string = completion.choices[0].message.content
+        print(f"--- Extracted JSON String ---\n{json_string}\n---------------------------")
+        instruction = json.loads(json_string)
 
-        response = requests.post(api_url, headers=headers, json=data, timeout=30)
-        response.raise_for_status()
-
-        raw_response_json = response.json()
-        # print(f"--- Raw Gemini API Response ---\n{json.dumps(raw_response_json, indent=2)}\n------------------------")
-
-        if raw_response_json.get('candidates') and raw_response_json['candidates'][0].get('content') and raw_response_json['candidates'][0]['content'].get('parts'):
-            json_string = raw_response_json['candidates'][0]['content']['parts'][0]['text']
-            # print(f"--- Extracted JSON String ---\n{json_string}\n---------------------------")
-            instruction = json.loads(json_string)
-
-            if not all(k in instruction for k in ['action', 'selector_type', 'selector']):
-                print("--- Error: Parsed JSON missing required keys (action, selector_type, selector). ---")
-                instruction = None
-            elif instruction['action'] in ['type', 'select_dropdown', 'click_dropdown_option'] and 'value' not in instruction:
-                 print(f"--- Error: Gemini response for '{instruction['action']}' action from description '{step_description[:50]}' missing 'value'. ---")
-                 instruction = None
-            elif instruction['selector_type'] not in ['css', 'xpath']:
-                 print("--- Error: Parsed JSON has invalid 'selector_type'. ---")
-                 instruction = None
-        else:
-            print("--- Error: Could not find JSON content in Gemini API response. ---")
-            # print(f"--- Raw Response: {json.dumps(raw_response_json, indent=2)} ---")
-
+        if not all(k in instruction for k in ['action', 'selector_type', 'selector']):
+            print("--- Error: Parsed JSON missing required keys (action, selector_type, selector). ---")
+            instruction = None
+        elif instruction['action'] in ['type', 'select_dropdown', 'click_dropdown_option'] and 'value' not in instruction:
+             print(f"--- Error: OpenRouter response for '{instruction['action']}' action from description '{step_description[:50]}' missing 'value'. ---")
+             instruction = None
+        elif instruction['selector_type'] not in ['css', 'xpath']:
+             print("--- Error: Parsed JSON has invalid 'selector_type'. ---")
+             instruction = None
 
         if instruction:
              print(f"--- Parsed Instruction ---\n{json.dumps(instruction, indent=2)}\n--------------------------")
 
         return instruction
 
-    except requests.exceptions.HTTPError as http_err:
-        print(f"--- HTTP error occurred: {http_err} - {response.text} ---")
-        return None
-    except requests.exceptions.RequestException as req_err:
-        print(f"--- Request error occurred: {req_err} ---")
-        return None
     except json.JSONDecodeError as jde:
         print(f"--- Error: Failed to decode extracted JSON string: {jde} ---")
         print(f"Extracted string was: {json_string}")
         return None
     except Exception as e:
-        print(f"--- Error during Gemini API call or JSON processing: {e} ---")
+        print(f"--- Error during OpenRouter API call or JSON processing: {e} ---")
         print(traceback.format_exc())
         return None
 

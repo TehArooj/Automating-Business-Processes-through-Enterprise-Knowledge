@@ -48,7 +48,8 @@ def main():
     ml_packages = [
         "sentence-transformers==4.1.0",
         "pymilvus==2.5.1",
-        "tiktoken==0.5.2"
+        "tiktoken==0.5.2",
+        "openai==1.97.0"
     ]
     
     # LangChain packages
