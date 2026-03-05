@@ -2,6 +2,7 @@ selenium==4.15.2
 webdriver-manager==4.0.1
 requests==2.31.0
 langchain==0.1.0
+langchain-core>=0.1.7,<0.2
 langchain-community==0.0.10
 pymilvus==2.5.1
 sentence-transformers==4.1.0

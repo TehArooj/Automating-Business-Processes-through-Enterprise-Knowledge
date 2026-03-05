@@ -10,13 +10,16 @@ from webdriver_manager.chrome import ChromeDriverManager
 import time
 import traceback
 import re
+import os
 import json # Import json module
 import requests # Import requests module
 from rag_system import MilvusRAGSystem # Import RAG system
 
 # --- Configuration ---
-GEMINI_API_KEY = "AIzaSyCGQJM3AcplIqN7jYGIsy-ETMEjPz9ndPo" # Added Gemini API Key
-LLM_MODEL = 'gemini-2.5-flash-preview-05-20' # Updated to use a Gemini model identifier
+# OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_API_KEY = "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"
+LLM_MODEL = "openai/gpt-oss-120b"
+OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 WAIT_TIMEOUT = 10 # Seconds to wait for elements
 DROPDOWN_WAIT_TIMEOUT = 15 # Longer timeout for dropdown operations
 SHORT_DELAY = 2 # Seconds delay after action
@@ -509,24 +512,31 @@ Based on the above, provide the JSON list of step descriptions:
 """
     json_string = None
     try:
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{LLM_MODEL}:generateContent?key={GEMINI_API_KEY}"
-        headers = {'Content-Type': 'application/json'}
-        data = {
-            "contents": [{"parts":[{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.2,
-                "responseMimeType": "application/json"
-            }
+        if not OPENROUTER_API_KEY:
+            print("--- Error: OPENROUTER_API_KEY is not set. ---")
+            return None
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
         }
-        response = requests.post(api_url, headers=headers, json=data, timeout=45)
+        data = {
+            "model": LLM_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+        }
+        response = requests.post(OPENROUTER_API_URL, headers=headers, json=data, timeout=45)
         response.raise_for_status()
         raw_response_json = response.json()
 
-        if raw_response_json.get('candidates') and \
-           raw_response_json['candidates'][0].get('content') and \
-           raw_response_json['candidates'][0]['content'].get('parts') and \
-           raw_response_json['candidates'][0]['content']['parts'][0].get('text'):
-            json_string = raw_response_json['candidates'][0]['content']['parts'][0]['text']
+        if raw_response_json.get("choices") and raw_response_json["choices"][0].get("message"):
+            json_string = raw_response_json["choices"][0]["message"].get("content")
+            if not json_string:
+                print("--- Error: Empty content in OpenRouter response. ---")
+                return None
+            json_string = json_string.strip()
+            if json_string.startswith("```"):
+                json_string = json_string.strip("`")
+                json_string = json_string.replace("json", "", 1).strip()
             print(f"--- Extracted JSON String for steps ---\n{json_string}\n---------------------------")
             parsed_steps = json.loads(json_string)
             if not isinstance(parsed_steps, list):
@@ -539,7 +549,7 @@ Based on the above, provide the JSON list of step descriptions:
             print(f"--- Parsed Step Descriptions ---\n{json.dumps(parsed_steps, indent=2)}\n--------------------------")
             return parsed_steps
         else:
-            print("--- Error: Could not find JSON content for steps in Gemini API response. ---")
+            print("--- Error: Could not find JSON content for steps in OpenRouter response. ---")
             print(f"--- Raw Response: {json.dumps(raw_response_json, indent=2)} ---")
             return None
     except requests.exceptions.HTTPError as http_err:
@@ -553,7 +563,7 @@ Based on the above, provide the JSON list of step descriptions:
         print(f"Extracted string was: {json_string}")
         return None
     except Exception as e:
-        print(f"--- Error during Gemini API call or JSON processing in get_llm_web_steps: {e} ---")
+        print(f"--- Error during OpenRouter API call or JSON processing in get_llm_web_steps: {e} ---")
         print(traceback.format_exc())
         return None
 
@@ -635,24 +645,34 @@ JSON Instruction:
     instruction = None
     json_string = None
     try:
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{LLM_MODEL}:generateContent?key={GEMINI_API_KEY}"
-        headers = {'Content-Type': 'application/json'}
+        if not OPENROUTER_API_KEY:
+            print("--- Error: OPENROUTER_API_KEY is not set. ---")
+            return None
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+        }
         data = {
-            "contents": [{"parts":[{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.1,
-                "responseMimeType": "application/json"
-            }
+            "model": LLM_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
         }
 
-        response = requests.post(api_url, headers=headers, json=data, timeout=30)
+        response = requests.post(OPENROUTER_API_URL, headers=headers, json=data, timeout=30)
         response.raise_for_status()
 
         raw_response_json = response.json()
-        # print(f"--- Raw Gemini API Response ---\n{json.dumps(raw_response_json, indent=2)}\n------------------------")
+        # print(f"--- Raw OpenRouter API Response ---\n{json.dumps(raw_response_json, indent=2)}\n------------------------")
 
-        if raw_response_json.get('candidates') and raw_response_json['candidates'][0].get('content') and raw_response_json['candidates'][0]['content'].get('parts'):
-            json_string = raw_response_json['candidates'][0]['content']['parts'][0]['text']
+        if raw_response_json.get("choices") and raw_response_json["choices"][0].get("message"):
+            json_string = raw_response_json["choices"][0]["message"].get("content")
+            if not json_string:
+                print("--- Error: Empty content in OpenRouter response. ---")
+                return None
+            json_string = json_string.strip()
+            if json_string.startswith("```"):
+                json_string = json_string.strip("`")
+                json_string = json_string.replace("json", "", 1).strip()
             # print(f"--- Extracted JSON String ---\n{json_string}\n---------------------------")
             instruction = json.loads(json_string)
 
@@ -660,13 +680,13 @@ JSON Instruction:
                 print("--- Error: Parsed JSON missing required keys (action, selector_type, selector). ---")
                 instruction = None
             elif instruction['action'] in ['type', 'select_dropdown', 'click_dropdown_option'] and 'value' not in instruction:
-                 print(f"--- Error: Gemini response for '{instruction['action']}' action from description '{step_description[:50]}' missing 'value'. ---")
+                 print(f"--- Error: OpenRouter response for '{instruction['action']}' action from description '{step_description[:50]}' missing 'value'. ---")
                  instruction = None
             elif instruction['selector_type'] not in ['css', 'xpath']:
                  print("--- Error: Parsed JSON has invalid 'selector_type'. ---")
                  instruction = None
         else:
-            print("--- Error: Could not find JSON content in Gemini API response. ---")
+            print("--- Error: Could not find JSON content in OpenRouter response. ---")
             # print(f"--- Raw Response: {json.dumps(raw_response_json, indent=2)} ---")
 
 
@@ -686,7 +706,7 @@ JSON Instruction:
         print(f"Extracted string was: {json_string}")
         return None
     except Exception as e:
-        print(f"--- Error during Gemini API call or JSON processing: {e} ---")
+        print(f"--- Error during OpenRouter API call or JSON processing: {e} ---")
         print(traceback.format_exc())
         return None
 
@@ -1306,7 +1326,7 @@ def main():
         rag_system = None
     
     driver = setup_driver()
-    initial_url = "https://sentry.tools.upcastr.co/auth/login/upcastr/?referrer=slack" # Example
+    initial_url = "https://bitnous.sentry.io" # Example
     
     # Get user goal - this could be from command line args, input, or hardcoded for testing
     user_goal = input("\nPlease enter your goal (what you want to accomplish): ").strip()

@@ -3,6 +3,7 @@
 import subprocess
 import sys
 import os
+import shlex
 
 def run_command(cmd, description):
     """Run a command and handle errors gracefully"""
@@ -21,7 +22,7 @@ def install_package(package, description=None):
     if description is None:
         description = f"Installing {package}"
     
-    cmd = f"pip3 install --no-cache-dir {package}"
+    cmd = f"pip3 install --no-cache-dir {shlex.quote(package)}"
     return run_command(cmd, description)
 
 def check_package(package_name):
@@ -54,6 +55,7 @@ def main():
     # LangChain packages
     langchain_packages = [
         "langchain==0.1.0",
+        "langchain-core>=0.1.7,<0.2",
         "langchain-community==0.0.10"
     ]
     

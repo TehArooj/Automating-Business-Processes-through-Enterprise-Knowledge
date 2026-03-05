@@ -44,6 +44,7 @@ if [ -f "requirements.txt" ]; then
         pip install --no-cache-dir pymilvus==2.3.4
         pip install --no-cache-dir sentence-transformers==2.2.2
         pip install --no-cache-dir langchain==0.1.0
+        pip install --no-cache-dir "langchain-core>=0.1.7,<0.2"
         pip install --no-cache-dir langchain-community==0.0.10
         pip install --no-cache-dir selenium==4.15.2
         pip install --no-cache-dir webdriver-manager==4.0.1
@@ -81,7 +82,7 @@ else
     echo "❌ Setup failed. Please check the logs above."
     echo "💡 Try running the commands manually:"
     echo "   1. $DOCKER_COMPOSE_CMD up -d"
-    echo "   2. pip install pymilvus sentence-transformers langchain"
+    echo "   2. pip install pymilvus sentence-transformers langchain \"langchain-core>=0.1.7,<0.2\" langchain-community==0.0.10"
     echo "   3. python setup_knowledge_base.py"
     exit 1
-fi 
+fi

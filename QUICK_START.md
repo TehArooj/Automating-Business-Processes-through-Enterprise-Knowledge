@@ -34,6 +34,7 @@ pip3 install sentence-transformers==4.1.0
 
 # LangChain
 pip3 install langchain==0.1.0
+pip3 install "langchain-core>=0.1.7,<0.2"
 pip3 install langchain-community==0.0.10
 
 # Optional
@@ -45,7 +46,7 @@ pip3 install tiktoken==0.5.2
 
 ```bash
 # Install pre-compiled wheels
-pip3 install --only-binary=all pymilvus sentence-transformers langchain
+pip3 install --only-binary=all pymilvus sentence-transformers langchain "langchain-core>=0.1.7,<0.2" langchain-community==0.0.10
 ```
 
 ## 3. Setup Knowledge Base
@@ -131,7 +132,7 @@ xcode-select --install
 
 # Use conda instead of pip for problematic packages
 conda install -c conda-forge sentence-transformers
-conda install -c conda-forge langchain
+conda install -c conda-forge langchain langchain-core langchain-community
 pip3 install pymilvus
 ```
 
@@ -147,7 +148,7 @@ docker compose down
 docker compose down -v
 
 # Clean up Python packages
-pip3 uninstall pymilvus sentence-transformers langchain -y
+pip3 uninstall pymilvus sentence-transformers langchain langchain-core langchain-community -y
 
 # Start fresh
 docker compose up -d

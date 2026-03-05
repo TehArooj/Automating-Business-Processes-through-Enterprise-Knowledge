@@ -5,10 +5,11 @@ from pathlib import Path
 from typing import List, Dict, Any
 from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.document_loaders import DirectoryLoader, TextLoader
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain_community.document_loaders import DirectoryLoader, TextLoader
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.schema import Document
 import logging
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,12 +39,20 @@ class MilvusRAGSystem:
         self._setup_collection()
     
     def _connect_to_milvus(self):
-        try:
-            connections.connect("default", host=self.milvus_host, port=self.milvus_port)
-            logger.info(f"Connected to Milvus at {self.milvus_host}:{self.milvus_port}")
-        except Exception as e:
-            logger.error(f"Failed to connect to Milvus: {e}")
-            raise
+        last_error = None
+        for attempt in range(1, 11):
+            try:
+                connections.connect("default", host=self.milvus_host, port=self.milvus_port)
+                logger.info(f"Connected to Milvus at {self.milvus_host}:{self.milvus_port}")
+                return
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"Milvus not ready (attempt {attempt}/10). Retrying in 3s... ({e})"
+                )
+                time.sleep(3)
+        logger.error(f"Failed to connect to Milvus after retries: {last_error}")
+        raise last_error
     
     def _setup_collection(self):
         # Define collection schema
